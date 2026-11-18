@@ -6,18 +6,11 @@
 #ifndef __NWM_H
 #define __NWM_H
 
-#include <X11/Xlib.h>
-
 // Prototypes
-void check_other_wm(Display * disp);
-void map_wm_window(Display * disp);
-void run(Display * disp);
-void handle_events(XEvent * next_event);
-void configure(XConfigureRequestEvent * configure);
-void circulate(XCirculateRequestEvent * circulate);
-
-// Handlers
-int other_wm_handler(Display * disp, XErrorEvent * err);
-int main_error_handler(Display * disp, XErrorEvent * err);
+void check_other_wm(void);
+void map_wm_window(void);
+void setup(void);
+void die(void);
+void run(void);
 
 #endif				// __NWM_H
