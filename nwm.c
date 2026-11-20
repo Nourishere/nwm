@@ -37,9 +37,12 @@ void circulate(XCirculateRequestEvent * circulate_event);
 int other_wm_handler(Display * disp, XErrorEvent * err);
 int main_error_handler(Display * disp, XErrorEvent * err);
 void add_client_window(Window window);
+void remove_client_window(Window window);
 void tile(void);
+static void set_the_one_and_only();
 static void map_primary(void);
 static void reconfigure(client * client);
+static void reclaim_primary(void);
 
 int main(int argc, char *argv[])
 {
@@ -81,8 +84,8 @@ void map_wm_window(void)
 
 	wm_window =
 	    XCreateSimpleWindow(main_display, XDefaultRootWindow(main_display),
-				0, 0, rootw_attr->width, WM_WINDOW_HEIGHT, 0, whiteColor,
-				whiteColor);
+				0, 0, rootw_attr->width, WM_WINDOW_HEIGHT, 0,
+				whiteColor, whiteColor);
 	XSelectInput(main_display, wm_window, StructureNotifyMask);
 
 	XMapRaised(main_display, wm_window);
@@ -130,14 +133,14 @@ void map(XMapRequestEvent *map_event)
 	if (window_count > 1)
 		tile();
 	else {			// Map the first window full screen
-		clients->x = w_changes->x = 0;
-		clients->y = w_changes->y = WM_WINDOW_HEIGHT;
-		clients->width = w_changes->width = rootw_attr->width;
-		clients->height = w_changes->height = rootw_attr->height - WM_WINDOW_HEIGHT;
-		XConfigureWindow(map_event->display, map_event->window,
+		set_the_one_and_only();
+		XConfigureWindow(main_display, map_event->window,
 				 CWX | CWY | CWWidth | CWHeight, w_changes);
 
-		XMapRaised(map_event->display, map_event->window);
+		XSelectInput(main_display, map_event->window,
+			     StructureNotifyMask);
+
+		XMapRaised(main_display, map_event->window);
 	}
 
 	XSync(map_event->display, false);
@@ -145,9 +148,41 @@ void map(XMapRequestEvent *map_event)
 	return;
 }
 
+static void set_the_one_and_only()
+{
+	clients->x = w_changes->x = 0;
+	clients->y = w_changes->y = WM_WINDOW_HEIGHT;
+	clients->width = w_changes->width = rootw_attr->width;
+	clients->height = w_changes->height =
+	    rootw_attr->height - WM_WINDOW_HEIGHT;
+}
+
 void unmap(XUnmapEvent *unmap_event)
 {
+	client *temp;
+	int primary = 0;
+	if (unmap_event->window == clients->window)
+		primary = 1;
+
+	// Remove the client from the list
+	remove_client_window(unmap_event->window);
+
 	window_count--;
+	if (window_count == 1) {
+		set_the_one_and_only();
+		XMoveResizeWindow(main_display, clients->window, clients->x,
+				  clients->y, clients->width, clients->height);
+	} else if (window_count > 1) {
+		// Restore primary if destroyed
+		if (primary) {
+			reclaim_primary();
+		}
+		temp = clients->prev;
+		while (temp->prev) {
+			reconfigure(temp);
+			temp = temp->prev;
+		}
+	}
 }
 
 void add_client_window(Window window)
@@ -161,6 +196,22 @@ void add_client_window(Window window)
 	clients->next = new_client;
 
 	clients = new_client;
+}
+
+void remove_client_window(Window window)
+{
+	client *removed = clients;
+	while (removed->window != window && removed->prev)
+		removed = removed->prev;
+	if (!removed->prev)
+		return;
+	if (removed->next)
+		removed->next->prev = removed->prev;
+	removed->prev->next = removed->next;
+
+	if (removed == clients)
+		clients = removed->prev;
+	free(removed);
 }
 
 void tile(void)
@@ -183,10 +234,13 @@ static void map_primary(void)
 	clients->x = w_changes->x = 0;
 	clients->y = w_changes->y = WM_WINDOW_HEIGHT;
 	clients->width = w_changes->width = total_width >> 1;
-	clients->height = w_changes->height = rootw_attr->height - WM_WINDOW_HEIGHT;
+	clients->height = w_changes->height =
+	    rootw_attr->height - WM_WINDOW_HEIGHT;
 
 	XConfigureWindow(main_display, clients->window,
 			 CWX | CWY | CWWidth | CWHeight, w_changes);
+
+	XSelectInput(main_display, clients->window, StructureNotifyMask);
 
 	XMapRaised(main_display, clients->window);
 }
@@ -196,15 +250,15 @@ static void reconfigure(client *client)
 	int x, y;
 	int height, width;
 
-	height = rootw_attr->height / (window_count - 1);
+	height = (rootw_attr->height - WM_WINDOW_HEIGHT) / (window_count - 1);
 	x = width = rootw_attr->width >> 1;
 
 	// The one right before the primary
-	if (client->next->next == 0) {
+	if (client->next->next == 0)
 		y = WM_WINDOW_HEIGHT;
-	} else {
+	else
 		y = client->next->y + height;
-	}
+
 	// Update coordinates
 	client->y = y;
 
@@ -249,6 +303,19 @@ void configure(XConfigureRequestEvent *configure)
 	XConfigureWindow(disp, configure->window, configure->value_mask,
 			 changes);
 	free(changes);
+}
+
+static void reclaim_primary(void)
+{
+	int x, y;
+	int width, height;
+
+	x = clients->x = 0;
+	y = clients->y = WM_WINDOW_HEIGHT;
+	width = clients->width = rootw_attr->width >> 1;
+	height = clients->height = rootw_attr->width - WM_WINDOW_HEIGHT;
+
+	XMoveResizeWindow(main_display, clients->window, x, y, width, height);
 }
 
 // Control the window stack
