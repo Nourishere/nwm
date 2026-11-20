@@ -8,7 +8,7 @@ This is still under construction!
 ## Installation and Running
 
 You would need to have GCC, make, Xlib, and an X server installed.
-Run `make -DEBUG=0` for a release version. The default is a debug build.
+Run `make DEBUG=0` for a release version. The default is a debug build.
 
 To run, you can do `startx /path/to/nwm -- :0` from a console tty.
 Another way is to build a `.xinitrc` file like this:
