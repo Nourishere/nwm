@@ -8,8 +8,10 @@
 #include <stdbool.h>
 #include <X11/Xlib.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define WM_WINDOW_HEIGHT 10
+#define ERROR_BUFFER_LEN 512
 
 static unsigned int border_width = 1;
 static unsigned int window_count = 0;
@@ -17,6 +19,7 @@ static Window wm_window;
 XWindowAttributes *rootw_attr;
 XWindowChanges *w_changes;
 Display *main_display;
+char *error_buffer;
 
 typedef struct client {
 	struct client *next;
@@ -34,7 +37,6 @@ void map(XMapRequestEvent * map_event);
 void unmap(XUnmapEvent * unmap_event);
 void configure(XConfigureRequestEvent * configure_event);
 void circulate(XCirculateRequestEvent * circulate_event);
-int other_wm_handler(Display * disp, XErrorEvent * err);
 int main_error_handler(Display * disp, XErrorEvent * err);
 void add_client_window(Window window);
 void remove_client_window(Window window);
@@ -54,6 +56,9 @@ int main(int argc, char *argv[])
 		       argv[0]);
 		return 1;
 	}
+	// Allocate the error buffer & set the main error handler
+	error_buffer = (char *)malloc(ERROR_BUFFER_LEN * sizeof(char));
+	XSetErrorHandler(main_error_handler);
 
 	main_display = XOpenDisplay(NULL);
 
@@ -95,7 +100,6 @@ void map_wm_window(void)
 // Loop around the event queue
 void run(void)
 {
-	XSetErrorHandler(main_error_handler);
 	XEvent next_event;
 
 	for (;;) {
@@ -111,10 +115,8 @@ void handle_events(XEvent *next_event)
 
 	if (event == CirculateRequest) {
 		circulate(&next_event->xcirculaterequest);
-		return;
 	} else if (event == ConfigureRequest) {
 		configure(&next_event->xconfigurerequest);
-		return;
 	} else if (event == MapRequest) {	/* Handle mapping requests */
 		map(&next_event->xmaprequest);
 	} else if (event == UnmapNotify) {
@@ -273,17 +275,7 @@ void check_other_wm(void)
 	// There is a possiblity we might need ResizeRequestMask, ButtonPressMask
 	long mask = SubstructureRedirectMask;
 
-	XSetErrorHandler(other_wm_handler);
 	XSelectInput(main_display, XDefaultRootWindow(main_display), mask);
-}
-
-int other_wm_handler(Display *disp, XErrorEvent *err)
-{
-	if (err->error_code == BadAccess) {
-		puts("nwm: another WM is running..");
-		exit(1);
-	}
-	return err->error_code;
 }
 
 void configure(XConfigureRequestEvent *configure)
@@ -325,13 +317,22 @@ void circulate(XCirculateRequestEvent *circulate)
 }
 
 /* This handler should take care of all possible errors we can
- * get from the `run` and `handle` functions
+ * get from the `run` and `handle` functions + any setup errors
  */
 int main_error_handler(Display *disp, XErrorEvent *err)
 {
 	unsigned char error = err->error_code;
+	// The only way we can get this is when
+	// `check_other_wm` fails because of privillage violation
+	if (error == BadAccess) {
+		puts("nwm: another WM is running..");
+		exit(err->error_code);
+	}
+	XGetErrorText(disp, error, error_buffer, ERROR_BUFFER_LEN);
+	if (error_buffer)
+		fprintf(stdout, "%s\n", error_buffer);
 
-	return 1;
+	exit(err->error_code);
 }
 
 void setup(void)
@@ -352,6 +353,7 @@ void die(void)
 {
 	free(w_changes);
 	free(rootw_attr);
+	free(error_buffer);
 	client *temp;
 	while (head->next != 0) {
 		temp = head;
